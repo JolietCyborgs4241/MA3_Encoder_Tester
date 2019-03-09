@@ -6,6 +6,9 @@
 #include <Adafruit_TFTLCD.h> // Hardware-specific library
 #include <TouchScreen.h>
 
+#include <Fonts/FreeSans12pt7b.h>
+#include <Fonts/FreeSansBold24pt7b.h>
+
 #if defined(__SAM3X8E__)
     #undef __FlashStringHelper::F(string_literal)
     #define F(string_literal) string_literal
@@ -66,6 +69,10 @@ TouchScreen ts = TouchScreen(XP, YP, XM, YM, 300);
 // optional
 #define LCD_RESET A4
 
+
+#define ANALOG_ENCODER_PIN  A5    // only free A2d on the UNO with this LCD
+
+
 // Assign human-readable names to some common 16-bit color values:
 #define	BLACK   0x0000
 #define	BLUE    0x001F
@@ -77,79 +84,129 @@ TouchScreen ts = TouchScreen(XP, YP, XM, YM, 300);
 #define WHITE   0xFFFF
 #define ORANGE  0xFD20
 
+#define BACKGROUND_COLOR    BLACK   // background color for LCD
+
+#define ACTIVE_BUTTON_COLOR WHITE   // outline in this color to highlight
+
 
 Adafruit_TFTLCD tft(LCD_CS, LCD_CD, LCD_WR, LCD_RD, LCD_RESET);
 
 #define BOXSIZE 40
 #define PENRADIUS 3
 
-#define LCD_HIGH    320
-#define LCD_WIDE    240
 
-#define BUTTON_BASE_X       10
+#define LCD_HIGH    240
+#define LCD_WIDE    320
+
+
+#define BUTTON_BASE_X       190
 #define BUTTON_BASE_Y       10
-#define BUTTON_HEIGHT       50
-#define BUTTON_WIDTH        120
+#define BUTTON_HEIGHT       120
+#define BUTTON_WIDTH        50
 #define BUTTON_SEPERATE     15
 
-#define VOLT_BAR_X          210
-#define VOLT_BAR_Y          10
+#define BUTTON_OUTLINE      3       // pixels around defined button coordinates
+
+
+#define VOLT_BAR_X          10
+#define VOLT_BAR_Y          210
 #define VOLT_BAR_HEIGHT     20
-#define VOLT_BAR_WIDTH      (LCD_HIGH - 2*VOLT_BAR_Y)
+#define VOLT_BAR_WIDTH      (LCD_WIDE - 2*VOLT_BAR_X)
 
 
+// voltage value display coordinates
 
-#define TO_NORMAL   1     // turnout settings
-#define TO_DIVERGE  2
+#define VOLT_INT_X          38
+#define VOLT_INT_Y          70
 
-#define OUT_TO_IN   1     // turnout IDS
-#define IN_TO_OUT   2
-#define SWIFTYS     3
+#define VOLT_DECIMAL_X      77
+#define VOLT_DECIMAL_Y      68
+#define VOLT_DECIMAL_RADIUS 4
 
-#define MAINLINE_CTRL_X     85
-#define OUT_TO_IN_CTRL_X    MAINLINE_CTRL_X
-#define IN_TO_OUT_CTRL_X    MAINLINE_CTRL_X
-#define SWIFTYS_CTRL_X      145
+#define VOLT_FRAC_X         90
+#define VOLT_FRAC_Y         70
 
-#define IN_TO_OUT_CTRL_Y   110
-#define OUT_TO_IN_CTRL_Y   (LCD_HIGH - IN_TO_OUT_CTRL_Y)
-#define SWIFTYS_CTRL_Y     (LCD_HIGH - 50)
+#define VOLT_V_X            122
+#define VOLT_V_Y            70
 
-#define TO_IND_RADIUS       20
+#define VOLT_CLEAR_X        10
+#define VOLT_CLEAR_Y        10
+#define VOLT_CLEAR_W        150
+#define VOLT_CLEAR_H        150
 
 
-// comm lines to maintain state between two modules
-//
-// the output lines from one module should connect to the H bridges to drive the Tortoises
-//
-// BE SURE TO SHARE A COMMON GND between the modules!
+// degree display coordinates
 
-#define   IN_TO_OUT_IN    A5
-#define   OUT_TO_IN_IN    2
-#define   SWIFTYS_IN      3
-#define   IN_TO_OUT_OUT   10
-#define   OUT_TO_IN_OUT   11
-#define   SWIFTYS_OUT     12
+#define DEG_HUN_X           45
+#define DEG_HUN_Y           150
+#define DEG_TEN_X           75 
+#define DEG_TEN_Y           150
+#define DEG_ONE_X           105
+#define DEG_ONE_Y           150
+
+#define DEG_SIGN_X          140
+#define DEG_SIGN_Y          120
+#define DEG_SIGN_RADIUS     3
+
+
+#define VOLT_IN_MAX         5       // max encoder value
+
+#define A2D_MAX             1023    // maximum unscaled A2D value
+
+
+int maxVoltage = 0;                 // set to the opposite extremes so they get updated
+int minVoltage = VOLT_IN_MAX;
+
 
 typedef struct {
-  int   x, y, h, w;
-  int   color;
-  char  *label;
+  int         x, y;
+  char        c;
+  int         color;
+} LABEL;
+
+typedef struct {
+  int         x, y, h, w;
+  int         color;
+  LABEL       *label;
 } BUTTONS;
 
-// the screen is actually in "portrait" mode but we sort of act like it's in "landscape" below when we
-// talk about "height" and "width"
-  
-BUTTONS buttons[] = {
-  { BUTTON_BASE_X,                                       BUTTON_BASE_Y, BUTTON_HEIGHT, BUTTON_WIDTH, CYAN,   "Current" },
-  { BUTTON_BASE_X +   BUTTON_HEIGHT +   BUTTON_SEPERATE, BUTTON_BASE_Y, BUTTON_HEIGHT, BUTTON_WIDTH, ORANGE, "Max" },
-  { BUTTON_BASE_X + 2*BUTTON_HEIGHT + 2*BUTTON_SEPERATE, BUTTON_BASE_Y, BUTTON_HEIGHT, BUTTON_WIDTH, ORANGE, "MIN" }
+LABEL current_label[] = {
+  { 211, 42, 'C',  BLACK },
+  { 230, 42, 'u',  BLACK },
+  { 243, 42, 'r',  BLACK },
+  { 252, 42, 'r',  BLACK },
+  { 260, 42, 'e',  BLACK },
+  { 273, 42, 'n',  BLACK },
+  { 285, 42, 't',  BLACK },
+  {   0,  0, '\0', 0 }
 };
 
+LABEL min_label[] =  {
+  { 230, 107, 'M',  BLACK }, 
+  { 251, 107, 'i',  BLACK },
+  { 259, 107, 'n',  BLACK },
+  {   0,   0, '\0', 0 }
+};
 
-int OutToInState = TO_NORMAL;
-int InToOutState = TO_NORMAL;
-int SwiftysState = TO_NORMAL;
+LABEL max_label[] = {
+  { 228, 174, 'M',  BLACK },
+  { 248, 174, 'a',  BLACK },
+  { 262, 174, 'x',  BLACK },
+  {   0,   0, '\0', 0 }
+};
+  
+BUTTONS buttons[] = {
+  { BUTTON_BASE_X, BUTTON_BASE_Y,                                      BUTTON_WIDTH, BUTTON_HEIGHT, CYAN,   current_label },
+  { BUTTON_BASE_X, BUTTON_BASE_Y +   BUTTON_WIDTH +   BUTTON_SEPERATE, BUTTON_WIDTH, BUTTON_HEIGHT, ORANGE, min_label },
+  { BUTTON_BASE_X, BUTTON_BASE_Y + 2*BUTTON_WIDTH + 2*BUTTON_SEPERATE, BUTTON_WIDTH, BUTTON_HEIGHT, ORANGE, max_label }
+};
+
+// indexes into buttons[] for individual button manipulation
+#define BUTTON_CURRENT    0
+#define BUTTON_MIN        1
+#define BUTTON_MAX        2
+
+
 
 #define DEBOUNCE_DELAY  1000    // milliseconds between switch activations
 
@@ -159,46 +216,110 @@ int SwiftysState = TO_NORMAL;
 
 
 
-void setTurnout(int turnout, int direction) {
 
-int color;
-int pinOut;
+// outline a button in the specified color to show it is selected
+//
+// buttons that were selected but should be shown as "de-selected" should have their outline
 
-  switch (direction) {
+void buttonOutline(int id, int color) {
 
-    case TO_NORMAL:
-      color = GREEN;
-      pinOut = HIGH;    // HIGH is mainline
-      break;
+int x, y, w, h;
 
-    case TO_DIVERGE:
-      color = RED;
-      pinOut = LOW;     // LOW is diverging
-      break;
-  }
+  // we actually want to draw three rects; the first at the calculated values below and then the others 1 pixel
+  // larger in each direction
+  //
+  // we do this because the draw operations are all 1 pixel wide
+  
+  x = buttons[id].x - BUTTON_OUTLINE;
+  y = buttons[id].y - BUTTON_OUTLINE;
+  w = buttons[id].w + 2 * BUTTON_OUTLINE;
+  h = buttons[id].h + 2 * BUTTON_OUTLINE;
 
-  switch (turnout) {
+  tft.drawRect(x, y, w, h, color);
 
-    case OUT_TO_IN:
-      tft.fillCircle(OUT_TO_IN_CTRL_X, OUT_TO_IN_CTRL_Y, TO_IND_RADIUS, color);
-//      digitalWrite(OUT_TO_IN_OUT, pinOut);
-      break;
+  // adjust to draw a rect 1 pixel larger in each direction
 
-    case IN_TO_OUT:
-      tft.fillCircle(IN_TO_OUT_CTRL_X, IN_TO_OUT_CTRL_Y, TO_IND_RADIUS, color);
-//      digitalWrite(IN_TO_OUT_OUT, pinOut);
-      break;
+  x--;    // we move the origins one pixel
+  y--;
+  w += 2; // we change the height and width two because we need to be one
+  h += 2; // more pixel on each side all around
 
-    case SWIFTYS:
-        tft.fillCircle(SWIFTYS_CTRL_X, SWIFTYS_CTRL_Y, TO_IND_RADIUS, color);
-//        digitalWrite(SWIFTYS_OUT, pinOut);
-        break;
-  }
+  tft.drawRect(x, y, w, h, color);
+
+  x--;
+  y--;
+  w += 2;
+  h += 2;
+
+  tft.drawRect(x, y, w, h, color);
 }
 
 
+
+// display degrees based on voltage (0 = 0 degrees, 5 = 360)
+
+void displayDegrees(int voltage)
+{
+  int degreeVal;
+
+  degreeVal = (float)voltage / (float)VOLT_IN_MAX * 10.0 * 360.0 / 100.0;
+
+  tft.setFont(&FreeSansBold24pt7b);
+
+  tft.drawChar(DEG_HUN_X, DEG_HUN_Y, (degreeVal / 100) + '0', WHITE, BLACK, 1);
+
+  tft.drawChar(DEG_TEN_X, DEG_TEN_Y, ((degreeVal % 100) / 10) + '0', WHITE, BLACK, 1);
+
+  tft.drawChar(DEG_ONE_X, DEG_ONE_Y, (degreeVal % 10) + '0', WHITE, BLACK, 1);
+
+  tft.drawCircle(DEG_SIGN_X, DEG_SIGN_Y, DEG_SIGN_RADIUS, WHITE);
+
+}
+
+
+
+// display a bar graph of the voltage bar at the bottom of the screen in proportion
+// the full voltage from the encoder under test
+
+void displayVoltageBar(int voltage)
+{
+  // voltage bar @ bottom
+  tft.fillRect(VOLT_BAR_X, VOLT_BAR_Y, VOLT_BAR_WIDTH, VOLT_BAR_HEIGHT, RED);  // Voltage display entire bar
+
+  // figure out how much to highlight - number coming in is 10x voltage (no deimal point so no floating poiunt)
+  tft.fillRect(VOLT_BAR_X, VOLT_BAR_Y, VOLT_BAR_WIDTH * ((float)voltage / (float)VOLT_IN_MAX / 10.0), VOLT_BAR_HEIGHT, WHITE);
+}
+
+
+
+// display the numeric voltage, angle, and update the voltage bar
+//
+// voltage coming in is 10x voltage (no floating point needed)
+
+void displayVoltage(int voltage)
+{
+  tft.setFont(&FreeSansBold24pt7b);
+
+  tft.fillRect(VOLT_CLEAR_X, VOLT_CLEAR_Y, VOLT_CLEAR_W, VOLT_CLEAR_H, BACKGROUND_COLOR);  // Clear full volt / angle area
+
+  tft.drawChar(VOLT_INT_X, VOLT_INT_Y, (voltage / 10) + '0', WHITE, BLACK, 1);
+
+  tft.fillCircle(VOLT_DECIMAL_X, VOLT_DECIMAL_Y, VOLT_DECIMAL_RADIUS, WHITE);
+
+  tft.drawChar(VOLT_FRAC_X, VOLT_FRAC_Y, (voltage % 10) + '0', WHITE, BLACK, 1);
+
+  tft.drawChar(VOLT_V_X, VOLT_V_Y, 'V', WHITE, BLACK, 1);
+
+  displayDegrees(voltage);
+
+  displayVoltageBar(voltage);
+}
+
+
+
 void setup(void) {
-  int i ;
+  int   i;
+  LABEL *labelPtr;
   
   Serial.begin(9600);
   Serial.println(F("Start!"));
@@ -231,35 +352,59 @@ void setup(void) {
 
   tft.begin(identifier);
 
-  tft.fillScreen(BLACK);
+  tft.setRotation(3);
+  
+  tft.fillScreen(BACKGROUND_COLOR);
+
+  tft.setFont(&FreeSans12pt7b);                 // button font
 
   for (i = 0 ; i < (sizeof(buttons)/sizeof(buttons[0])) ; i++) {
-    tft.fillRect(buttons[i].x, buttons[i].y, buttons[i].h, buttons[i].w, buttons[i].color);
+    tft.fillRect(buttons[i].x, buttons[i].y, buttons[i].w, buttons[i].h, buttons[i].color); // draw button
+    
+    for (labelPtr = buttons[i].label ; labelPtr->c ; labelPtr++) {
+      tft.drawChar(labelPtr->x, labelPtr->y, labelPtr->c, labelPtr->color, BLACK, 1);       // draw label
+    }
   }
 
-  //tft.fillRect( BUTTON_BASE_X, BUTTON_BASE_Y, BUTTON_HEIGHT, BUTTON_WIDTH, CYAN);           // "Current" button
-  //tft.fillRect( 75, BUTTON_BASE_Y, BUTTON_HEIGHT, BUTTON_WIDTH, ORANGE);         // "Max" Button
-  //tft.fillRect(140, BUTTON_BASE_Y, BUTTON_HEIGHT, BUTTON_WIDTH, ORANGE);         // "Min" Button
-
-
-
-  tft.fillRect(VOLT_BAR_X, VOLT_BAR_Y, VOLT_BAR_HEIGHT, VOLT_BAR_WIDTH, RED);  // Voltage display bar
-
+  buttonOutline(BUTTON_CURRENT, ACTIVE_BUTTON_COLOR);
+  
   pinMode(13, OUTPUT);
 }
 
-unsigned long now;
-unsigned long outToInTime = 0;
-unsigned long inToOutTime = 0;
-unsigned long swiftysTime = 0;
+
+
+int lastA2dInput = 0;
 
 
 void loop()
 {
-  now = millis();
+  int a2dInput, voltage;
+
+  // get and display the input voltage
+  
+  a2dInput = analogRead(ANALOG_ENCODER_PIN);
+
+  a2dInput &= ~0x0f;    // drop low 4 bits for more display stability
+
+  if (a2dInput != lastA2dInput) {
+    
+    lastA2dInput = a2dInput;
+
+    voltage = (float)a2dInput / (float) A2D_MAX * (float)VOLT_IN_MAX *10;     // we scale it to tenths with no decimal
+
+    displayVoltage(voltage);
+
+    if (voltage > maxVoltage) {
+      maxVoltage = voltage;  
+    }
+
+    if (voltage < minVoltage) {
+      minVoltage = voltage;
+    }
+  }
   
   digitalWrite(13, HIGH);
-  TSPoint p = ts.getPoint();
+  TSPoint p = ts.getPoint();    // check for a button
   digitalWrite(13, LOW);
 
   pinMode(XM, OUTPUT);
@@ -270,94 +415,21 @@ void loop()
   // pressure of 0 means no pressing!
 
   if (p.z > MINPRESSURE && p.z < MAXPRESSURE) {
-
+    Serial.print(p.x);
+    Serial.print(", ");
+    Serial.println(p.y);
     // scale from 0->1023 to tft.width
     p.x = map(p.x, TS_MINX, TS_MAXX, tft.width(), 0);
     p.y = map(p.y, TS_MINY, TS_MAXY, tft.height(), 0);
-
+    Serial.print(p.x);
+    Serial.print(", ");
+    Serial.println(p.y);
     p.x = LCD_WIDE - p.x; // Normalize to match graphic coordinates
     p.y = LCD_HIGH - p.y;
-    
-    Serial.print("("); Serial.print(p.x);
-    Serial.print(", "); Serial.print(p.y);
-    Serial.print(")  now = "); Serial.print(now);
-    Serial.print(", swiftysTime = "); Serial.println(swiftysTime);
 
-    // check to see if this is an active turnout control
-
-    // OUT_TO_IN?
-
-    if (p.x > (OUT_TO_IN_CTRL_X - TO_IND_RADIUS * 2) && p.x < (OUT_TO_IN_CTRL_X + TO_IND_RADIUS * 2) &&
-        p.y > (OUT_TO_IN_CTRL_Y - TO_IND_RADIUS * 2) && p.y < (OUT_TO_IN_CTRL_Y + TO_IND_RADIUS * 2) &&
-        now - outToInTime > DEBOUNCE_DELAY) {
-
-       if (OutToInState == TO_NORMAL) {
-         OutToInState = TO_DIVERGE;
-       } else {
-         OutToInState = TO_NORMAL;
-       }
-
-       setTurnout(OUT_TO_IN, OutToInState);
-       outToInTime = now;
-     }
-
-    // IN_TO_OUT?
-
-    if (p.x > (IN_TO_OUT_CTRL_X - TO_IND_RADIUS * 2) && p.x < (IN_TO_OUT_CTRL_X + TO_IND_RADIUS * 2) &&
-        p.y > (IN_TO_OUT_CTRL_Y - TO_IND_RADIUS * 2) && p.y < (IN_TO_OUT_CTRL_Y + TO_IND_RADIUS * 2) &&
-        now - inToOutTime > DEBOUNCE_DELAY) {
-
-       if (InToOutState == TO_NORMAL) {
-         InToOutState = TO_DIVERGE;
-       } else {
-         InToOutState = TO_NORMAL;
-       }
-
-       setTurnout(IN_TO_OUT, InToOutState);
-       inToOutTime = now;
-    }
-
-    // SWIFTYS?
-
-    if (p.x > (SWIFTYS_CTRL_X - TO_IND_RADIUS * 2) && p.x < (SWIFTYS_CTRL_X + TO_IND_RADIUS * 2) &&
-        p.y > (SWIFTYS_CTRL_Y - TO_IND_RADIUS * 2) && p.y < (SWIFTYS_CTRL_Y + TO_IND_RADIUS * 2) &&
-        now - swiftysTime > DEBOUNCE_DELAY) {
-
-       if (SwiftysState == TO_NORMAL) {
-         SwiftysState = TO_DIVERGE;
-       } else {
-         SwiftysState = TO_NORMAL;
-       }
-
-       setTurnout(SWIFTYS, SwiftysState);
-       swiftysTime = now;
-     }
+    Serial.print(p.x);
+    Serial.print(", ");
+    Serial.println(p.y);
+    Serial.println("----");
   } 
-
-/*
-   delay(50);     // wait a bit and then check the input lines from the other controller and set the
-                  // turnouts appropriately
-                  //
-                  // it should have picked up our changes and on the *_OUT lines and echoed them back
-                  // on the *_IN lines or it could have been the source fo the changes and now we'll echo them back
-  if (digitalRead(IN_TO_OUT_IN) == HIGH) {
-    InToOutState = TO_DIVERGE;
-  } else {
-    InToOutState = TO_NORMAL;
-  }
-  setTurnout(IN_TO_OUT, InToOutState);    // set it unconditionally - it will either be the same (which would be benign)
-                                          // or it will echo the change from the other module
-  if (digitalRead(OUT_TO_IN_IN) == HIGH) {
-    OutToInState = TO_DIVERGE;
-  } else {
-    OutToInState = TO_NORMAL;
-  }
-  setTurnout(OUT_TO_IN, OutToInState);
-  if (digitalRead(SWIFTYS_IN) == HIGH) {
-    SwiftysState = TO_DIVERGE;
-  } else {
-    SwiftysState = TO_NORMAL;
-  }
-  setTurnout(IN_TO_OUT, SwiftysState);
-*/
 }
